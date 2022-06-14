@@ -1,8 +1,5 @@
-from email import iterators
 import tensorflow as tf
 from PIL import Image
-import time
-import math
 #from google.colab import drive
 import numpy as np
 from tensorflow import keras
@@ -14,7 +11,6 @@ import keras
 from tensorflow.keras.applications import vgg19
 import numpy as np
 from tensorflow.keras.optimizers import SGD
-from tensorflow.keras import optimizers
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 #from tensorflow.python.keras.applications.vgg19 import VGG19, preprocess_input
@@ -23,7 +19,6 @@ from tensorflow.python.keras.models import Model
 from tensorflow.keras.utils import plot_model
 from tensorflow.keras.models import load_model
 from datetime import datetime
-from tensorflow import keras
 from tensorflow.keras import optimizers
 from tensorflow.keras.optimizers import schedules
 
@@ -52,7 +47,6 @@ model.trainable = False
 
 model.compile(optimizer='adam', metrics=['accuracy'])
 
-model= model.create()
 
 model.summary()
 
@@ -164,58 +158,60 @@ def result_saver(iteration):
   #model.save_weights('./best_model.t7')
   model.save('Desktop/2/best_model.h5')
 
-
-
-def training_loop(base_image_path, style_image_path, iterations=5, a=10, b=1000, num_epochs=1, ):
-    for epoch in range(num_epochs):
-        model.load_weights('weight_of_layer.h5')
-        epoch_loss_avg = tf.keras.metrics.Mean()
-        epoch_accuracy = tf.keras.metrics.SparseCategoricalAccuracy()
-
-    # load content and style images from their respective path
-        content = preprocess_image(base_image_path)
-        style = preprocess_image(style_image_path)
-        generated = tf.Variable(content, dtype=tf.float32)
+content = preprocess_image(base_image_path)
+style = preprocess_image(style_image_path)
+generated = tf.Variable(content, dtype=tf.float32)
     
-    #optimization
-        opt = tf.keras.optimizers.Adam(learning_rate=7)
- 
-        best_cost = math.inf
-        best_image = None
-        for i in range(iterations):
-            with tf.GradientTape() as tape:
-            
-                J_content = content_loss(content, generated)
-                J_style = style_cost(style, generated)
-                J_total = a * J_content + b * J_style
- 
-            grads = tape.gradient(J_total, generated)
-            opt.apply_gradients([(grads, generated)])
+opt = tf.keras.optimizers.Adam(learning_rate=0.7)  
+
+def train_step(generated_image):
+    with tf.GradientTape() as tape:
+
+        J_style = style_cost(style, generated)
+        J_content = content_loss(content, generated)
+        J_total = 10 * J_content + 1000 * J_style
         
-            if J_total < best_cost:
-                best_cost = J_total
-                best_image = generated.numpy()
- 
-            print("Iteration :{}".format(i))
-            print('Total Loss {:e}.'.format(J_total))
-            generated_images.append(generated.numpy())
-            epoch_loss_avg.update_state(J_total)
-            #epoch_accuracy.update_state(style_image_path, best_image)
-            if epoch % 2 == 0:
-                print("Epoch {:03d}: Loss: {:.3f}, Accuracy: {:.3%}".format(epoch,
-                                                                epoch_loss_avg.result(),
-                                                                epoch_accuracy.result()))
-        model.save_weights('weight_of_layer.h5')
+    grads = tape.gradient(J_total, generated)
+    opt.apply_gradients([(grads, generated)])
+    generated_image.assign(tf.clip_by_value(generated_image, clip_value_min=0.0, clip_value_max=1.0))
+    print('Iteration Loss {:e}.'.format(J_total))
+    epochs_loss_avg.update_state(J_total)  
+    best_image = generated.numpy()
+    # For grading purposes
+    return J_total, best_image
 
-
-    result_saver(iterations)
-    return best_image
 
 # Train the model and get best image
-final_img = training_loop(base_image_path, style_image_path)
+
+epochs = 2
+steps_per_epoch=5
+step = 0
+epochs_loss_avg = tf.keras.metrics.Mean()
+epochs_accuracy = tf.keras.metrics.SparseCategoricalAccuracy()
+best_image = None
+
+for n in range(0, epochs +1):
+    print(f"Epoch {n} ")
+    for m in range(0, steps_per_epoch):
+        print("Iteration :{}".format(m))
+        step += 1
+        model.load_weights('weight_of_layer.h5')  
+        train_step(generated)
+
+
+    #print('Total Loss {:e}.'.format(content_loss))
+            #epoch_accuracy.update_state(style_image_path, best_image)
+    print("Epoch {:03d}: Loss: {:.3f}, Accuracy: {:.3%}".format(n,
+                                                                epochs_loss_avg.result(),
+                                                                epochs_accuracy.result()))
+    model.save_weights('weight_of_layer.h5')
+#final_img = best_image
+result_saver(epochs)
+
+
 
 # code to display best generated image and last 10 intermediate results
-plt.figure(figsize=(12, 12))
+#plt.figure(figsize=(12, 12))
  
 #for i in range(10):
    # plt.subplot(4, 3, i + 1)
@@ -225,7 +221,7 @@ plt.figure(figsize=(12, 12))
 # plot best result
 
   
-display_image(final_img)
-plt.show()
+#display_image(final_img)
+#plt.show()
 newmodel= load_model('Desktop/2/best_model.h5')
 newmodel.summary()
