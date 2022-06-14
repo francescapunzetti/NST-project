@@ -1,10 +1,12 @@
+from email import iterators
 import tensorflow as tf
-import os
-import cv2
 from PIL import Image
+import time
+import math
 #from google.colab import drive
 import numpy as np
-from tensorflow.keras.utils import load_img
+from tensorflow import keras
+from keras.preprocessing.image import load_img
 import matplotlib.pyplot as plt
 from tensorflow import keras
 from keras import Model
@@ -15,8 +17,11 @@ from tensorflow.keras.optimizers import SGD
 from tensorflow.keras import optimizers
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
+#from tensorflow.python.keras.applications.vgg19 import VGG19, preprocess_input
+from tensorflow.keras.preprocessing.image import load_img, img_to_array
+from tensorflow.python.keras.models import Model
 from tensorflow.keras.utils import plot_model
-from tensorflow.keras.utils import plot_model
+from tensorflow.keras.models import load_model
 from datetime import datetime
 from tensorflow import keras
 from tensorflow.keras import optimizers
@@ -37,88 +42,35 @@ axarr[0].imshow(a)
 axarr[1].imshow(b)
 #plt.show()
 
-def gram_matrix(x):
-    x = tf.transpose(x, (2, 0, 1))
-    features = tf.reshape(x, (tf.shape(x)[0], -1))
-    gram = tf.matmul(features, tf.transpose(features))
-    return gram
+model = vgg19.VGG19(
+    include_top=False,
+    weights='imagenet',
+)
+# set training to False
+model.trainable = False
+# Print details of different layers
 
-def coste_estilo(style, combination):
-    S = gram_matrix(style)
-    C = gram_matrix(combination)
-    channels = 3
-    size = img_nrows * img_ncols
-    return tf.reduce_sum(tf.square(S - C)) / (4.0 * (channels ** 2) * (size ** 2))
+model.compile(optimizer='adam', metrics=['accuracy'])
 
-def coste_contenido(base, combination):
-    return tf.reduce_sum(tf.square(combination - base))
-
-
-model = vgg19.VGG19(weights="imagenet", include_top=False)
+model= model.create()
 
 model.summary()
 
-
-outputs_dict= dict([(layer.name, layer.output) for layer in model.layers])
-
-feature_extractor = Model(inputs=model.inputs, outputs=outputs_dict)
-
-capas_estilo = [
-    "block1_conv1",
-    "block2_conv1",
-    "block3_conv1",
-    "block4_conv1",
-    "block5_conv1",
-]
-
-capas_contenido = "block5_conv2"
-
-content_weight = 2.5e-8
-style_weight = 1e-6
-
-def loss_function(combination_image, base_image, style_reference_image):
-
-    # 1. Combine all the images in the same tensioner.
-    input_tensor = tf.concat(
-        [base_image, style_reference_image, combination_image], axis=0
-    )
-
-    # 2. Get the values in all the layers for the three images.
-    features = feature_extractor(input_tensor)
-
-    #3. Inicializar the loss
-
-    loss = tf.zeros(shape=())
-
-    # 4. Extract the content layers + content loss
-    layer_features = features[capas_contenido]
-    base_image_features = layer_features[0, :, :, :]
-    combination_features = layer_features[2, :, :, :]
-
-    loss = loss + content_weight * coste_contenido(
-        base_image_features, combination_features
-    )
-    # 5. Extraer the style layers + style loss
-    for layer_name in capas_estilo:
-        layer_features = features[layer_name]
-        style_reference_features = layer_features[1, :, :, :]
-        combination_features = layer_features[2, :, :, :]
-        sl = coste_estilo(style_reference_features, combination_features)
-        loss += (style_weight / len(capas_estilo)) * sl
-
-    return loss
-
-
-@tf.function
-def compute_loss_and_grads(combination_image, base_image, style_reference_image):
-    with tf.GradientTape() as tape:
-        loss = loss_function(combination_image, base_image, style_reference_image)
-    grads = tape.gradient(loss, combination_image)
-    return loss, grads
-
+def display_image(image):
+    # remove one dimension if image has 4 dimension
+    if len(image.shape) == 4:
+        img = np.squeeze(image, axis=0)
+ 
+    img = deprocess_image(img)
+ 
+    plt.grid(False)
+    plt.xticks([])
+    plt.yticks([])
+    plt.imshow(img)
+    return
 
 def preprocess_image(image_path):
-    # Util function to open, resize and format pictures into appropriate tensors
+    # Function to open, resize and format pictures into appropriate tensors
     img = keras.preprocessing.image.load_img(
         image_path, target_size=(img_nrows, img_ncols)
     )
@@ -129,59 +81,151 @@ def preprocess_image(image_path):
 
 def deprocess_image(x):
 
-    # Convertimos el tensor en Array
+    # Conversion into an array
     x = x.reshape((img_nrows, img_ncols, 3))
-
-    # Hacemos que no tengan promedio 0
+   
     x[:, :, 0] += 103.939
     x[:, :, 1] += 116.779
     x[:, :, 2] += 123.68
 
-    # Convertimos de BGR a RGB.
+    # Conversion from BGR to RGB.
     x = x[:, :, ::-1]
 
-    # Nos aseguramos que están entre 0 y 255
     x = np.clip(x, 0, 255).astype("uint8")
 
     return x
-
-
-def result_saver(iteration):
-  # Create name
-  now = datetime.now()
-  now = now.strftime("%Y%m%d_%H%M%S")
-  model_name = str(i) + '_' + str(now)+"_model_" + '.h5'
-  image_name = str(i) + '_' + str(now)+"_image" + '.tif'
-
-  # Save image
-  img = deprocess_image(combination_image.numpy())
-  keras.preprocessing.image.save_img(image_name, img)
-  model.save(model_name)
-  #keras.models.save_model('Users/francescapunzetti/Desktop/2') 
-
 
 #dimensions of the generated picture
 width, height = keras.preprocessing.image.load_img(base_image_path).size
 img_nrows = 400
 img_ncols = int(width * img_nrows / height)
 
-optimizer = SGD(
-    keras.optimizers.schedules.ExponentialDecay(
-        initial_learning_rate=100.0, decay_steps=100, decay_rate=0.96
-    )
-)
-
 base_image = preprocess_image(base_image_path)
 style_reference_image = preprocess_image(style_image_path)
 combination_image = tf.Variable(preprocess_image(base_image_path))
 
-iterations = 10
-for i in range(1, iterations + 1):
-    loss, grads = compute_loss_and_grads(
-        combination_image, base_image, style_reference_image
-    )
-    optimizer.apply_gradients([(grads, combination_image)])
-    if i % 10 == 0:
-        print("Iteration %d: loss=%.2f" % (i, loss))
-        result_saver(i)
+content_layer = "block5_conv2"
+content_model = Model(
+    inputs=model.input,
+    outputs=model.get_layer(content_layer).output
+)
+content_model.summary()
+
+style_layers = [
+    "block1_conv1",
+    "block3_conv1",
+    "block5_conv1",
+]
+style_models = [Model(inputs=model.input,
+                      outputs=model.get_layer(layer).output) for layer in style_layers]
+
+
+def content_loss(content, generated):
+    return tf.reduce_sum(tf.square(generated - content))
+
+def gram_matrix(A):
+    channels = int(A.shape[-1])
+    a = tf.reshape(A, [-1, channels])
+    n = tf.shape(a)[0]
+    gram = tf.matmul(a, a, transpose_a=True)
+    return gram / tf.cast(n, tf.float32)
+
+
+weight_of_layer = 1. / len(style_models)
+
+
+def style_cost(style, generated):
+    J_style = 0
+ 
+    for style_model in style_models:
+        a_S = style_model(style)
+        a_G = style_model(generated)
+        GS = gram_matrix(a_S)
+        GG = gram_matrix(a_G)
+        current_cost = tf.reduce_mean(tf.square(GS - GG))
+        J_style += current_cost * weight_of_layer
+ 
+    return J_style
+
+generated_images = []
+
+#preparing th model 
+
+def result_saver(iteration):
+  # Create name
+  now = datetime.now()
+  now = now.strftime("%Y%m%d_%H%M%S")
+  model_name = 'best_model'
+  image_name = str(iteration) + '_' + str(now)+"_image" + '.tif'
+
+  # Save image
+  img = deprocess_image(combination_image.numpy())
+  keras.preprocessing.image.save_img(image_name, img)
+  #model.save_weights('./best_model.t7')
+  model.save('Desktop/2/best_model.h5')
+
+
+
+def training_loop(base_image_path, style_image_path, iterations=5, a=10, b=1000, num_epochs=1, ):
+    for epoch in range(num_epochs):
+        model.load_weights('weight_of_layer.h5')
+        epoch_loss_avg = tf.keras.metrics.Mean()
+        epoch_accuracy = tf.keras.metrics.SparseCategoricalAccuracy()
+
+    # load content and style images from their respective path
+        content = preprocess_image(base_image_path)
+        style = preprocess_image(style_image_path)
+        generated = tf.Variable(content, dtype=tf.float32)
+    
+    #optimization
+        opt = tf.keras.optimizers.Adam(learning_rate=7)
+ 
+        best_cost = math.inf
+        best_image = None
+        for i in range(iterations):
+            with tf.GradientTape() as tape:
+            
+                J_content = content_loss(content, generated)
+                J_style = style_cost(style, generated)
+                J_total = a * J_content + b * J_style
+ 
+            grads = tape.gradient(J_total, generated)
+            opt.apply_gradients([(grads, generated)])
+        
+            if J_total < best_cost:
+                best_cost = J_total
+                best_image = generated.numpy()
+ 
+            print("Iteration :{}".format(i))
+            print('Total Loss {:e}.'.format(J_total))
+            generated_images.append(generated.numpy())
+            epoch_loss_avg.update_state(J_total)
+            #epoch_accuracy.update_state(style_image_path, best_image)
+            if epoch % 2 == 0:
+                print("Epoch {:03d}: Loss: {:.3f}, Accuracy: {:.3%}".format(epoch,
+                                                                epoch_loss_avg.result(),
+                                                                epoch_accuracy.result()))
+        model.save_weights('weight_of_layer.h5')
+
+
+    result_saver(iterations)
+    return best_image
+
+# Train the model and get best image
+final_img = training_loop(base_image_path, style_image_path)
+
+# code to display best generated image and last 10 intermediate results
+plt.figure(figsize=(12, 12))
+ 
+#for i in range(10):
+   # plt.subplot(4, 3, i + 1)
+   # display_image(generated_images[i])
+#plt.show()
+ 
+# plot best result
+
   
+display_image(final_img)
+plt.show()
+newmodel= load_model('Desktop/2/best_model.h5')
+newmodel.summary()
