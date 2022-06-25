@@ -1,3 +1,4 @@
+import math
 import tensorflow as tf
 from PIL import Image
 #from google.colab import drive
@@ -30,11 +31,11 @@ style_image_path = 'coloredmini.tif'
 base_image_path = 'biancomini.tif'
 
 # read the image file in a numpy array
-a = plt.imread('coloredmini.tif')
-b = plt.imread('biancomini.tif')
-f, axarr = plt.subplots(1,2, figsize=(15,15))
-axarr[0].imshow(a)
-axarr[1].imshow(b)
+#a = plt.imread('coloredmini.tif')
+#b = plt.imread('biancomini.tif')
+#f, axarr = plt.subplots(1,2, figsize=(15,15))
+#axarr[0].imshow(a)
+#axarr[1].imshow(b)
 #plt.show()
 
 model = vgg19.VGG19(
@@ -94,10 +95,6 @@ width, height = keras.preprocessing.image.load_img(base_image_path).size
 img_nrows = 400
 img_ncols = int(width * img_nrows / height)
 
-base_image = preprocess_image(base_image_path)
-style_reference_image = preprocess_image(style_image_path)
-combination_image = tf.Variable(preprocess_image(base_image_path))
-
 content_layer = "block5_conv2"
 content_model = Model(
     inputs=model.input,
@@ -126,7 +123,7 @@ def gram_matrix(A):
 
 
 weight_of_layer = 1. / len(style_models)
-
+model.save_weights('weight_of_layer.h5')
 
 def style_cost(style, generated):
     J_style = 0
@@ -141,9 +138,23 @@ def style_cost(style, generated):
  
     return J_style
 
+
 generated_images = []
 
 #preparing th model 
+
+epochs = 10
+num_epochs=100
+epochs_loss_avg = tf.keras.metrics.Mean()
+epochs_accuracy = tf.keras.metrics.SparseCategoricalAccuracy()
+best_image = None
+losses= np.zeros(epochs+1)
+epoch = list(range(len(losses)))
+
+content = preprocess_image(base_image_path)
+style = preprocess_image(style_image_path)
+generated = tf.Variable(content, dtype=tf.float32)
+
 
 def result_saver(iteration):
   # Create name
@@ -153,61 +164,62 @@ def result_saver(iteration):
   image_name = str(iteration) + '_' + str(now)+"_image" + '.tif'
 
   # Save image
-  img = deprocess_image(combination_image.numpy())
+  img = deprocess_image(generated.numpy())
   keras.preprocessing.image.save_img(image_name, img)
   #model.save_weights('./best_model.t7')
-  model.save('Desktop/2/best_model.h5')
+  model.save('Training/best_model.h5')
 
-content = preprocess_image(base_image_path)
-style = preprocess_image(style_image_path)
-generated = tf.Variable(content, dtype=tf.float32)
-    
-opt = tf.keras.optimizers.Adam(learning_rate=0.7)  
+def training_loop(base_image_path, style_image_path, a=10, b=1000 ):
+    for n in range(epochs):
+        model.load_weights('weight_of_layer.h5')
+    # load content and style images from their respective path
 
-def train_step(generated_image):
-    with tf.GradientTape() as tape:
+    #optimization
+        opt = tf.keras.optimizers.Adam(learning_rate=7)
 
-        J_style = style_cost(style, generated)
-        J_content = content_loss(content, generated)
-        J_total = 10 * J_content + 1000 * J_style
+        best_cost = math.inf
+        best_image = None
+        for i in range(num_epochs):
+            with tf.GradientTape() as tape:
+
+                J_content = content_loss(content, generated)
+                J_style = style_cost(style, generated)
+                J_total = a * J_content + b * J_style
+
+            grads = tape.gradient(J_total, generated)
+            opt.apply_gradients([(grads, generated)])
+
+            if J_total < best_cost:
+                best_cost = J_total
+                best_image = generated.numpy()
+
+            print("Iteration :{}".format(i))
+            print('Total Loss {:e}.'.format(J_total))
+            generated_images.append(generated.numpy())
+            epochs_loss_avg.update_state(J_total)
+        losses[n]= epochs_loss_avg.result().numpy()
+            #epoch_accuracy.update_state(style_image_path, best_image)
         
-    grads = tape.gradient(J_total, generated)
-    opt.apply_gradients([(grads, generated)])
-    generated_image.assign(tf.clip_by_value(generated_image, clip_value_min=0.0, clip_value_max=1.0))
-    print('Iteration Loss {:e}.'.format(J_total))
-    epochs_loss_avg.update_state(J_total)  
-    best_image = generated.numpy()
-    # For grading purposes
-    return J_total, best_image
+        if n%1==0:
+            result_saver(n)
+        if n % 2 == 0:
+            print("Epoch {:03d}: Loss: {:.3f}, Accuracy: {:.3%}".format(n,
+                                                                epochs_loss_avg.result(),
+                                                                epochs_accuracy.result()))
+            
+        
+        model.save_weights('weight_of_layer.h5')
+
+
+    
+    return best_image
 
 
 # Train the model and get best image
+final_img = training_loop(base_image_path, style_image_path)
 
-epochs = 2
-steps_per_epoch=5
-step = 0
-epochs_loss_avg = tf.keras.metrics.Mean()
-epochs_accuracy = tf.keras.metrics.SparseCategoricalAccuracy()
-best_image = None
-
-for n in range(0, epochs +1):
-    print(f"Epoch {n} ")
-    for m in range(0, steps_per_epoch):
-        print("Iteration :{}".format(m))
-        step += 1
-        model.load_weights('weight_of_layer.h5')  
-        train_step(generated)
-
-
-    #print('Total Loss {:e}.'.format(content_loss))
-            #epoch_accuracy.update_state(style_image_path, best_image)
-    print("Epoch {:03d}: Loss: {:.3f}, Accuracy: {:.3%}".format(n,
-                                                                epochs_loss_avg.result(),
-                                                                epochs_accuracy.result()))
-    model.save_weights('weight_of_layer.h5')
-#final_img = best_image
-result_saver(epochs)
-
+#print(losses)
+plt.plot(epoch,losses)
 
 
 # code to display best generated image and last 10 intermediate results
@@ -222,6 +234,6 @@ result_saver(epochs)
 
   
 #display_image(final_img)
-#plt.show()
-newmodel= load_model('Desktop/2/best_model.h5')
+plt.show()
+newmodel= load_model('Training/best_model.h5')
 newmodel.summary()
